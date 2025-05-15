@@ -114,7 +114,7 @@ async function run() {
   await sendTelegramMessage(alertMessage);
 
   if (total >= parseFloat(process.env.ALERT_THRESHOLD!)) {
-    alertMessage = `Total value exceeds threshold ${total.toFixed(2)}.`;
+    alertMessage = `Total value exceeds threshold!`;
     log(alertMessage);
     await sendTelegramMessage('🚨 <b>Portfolio Alert</b> ' + alertMessage);
   }
