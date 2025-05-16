@@ -86,11 +86,11 @@ async function sendTelegramMessage(message: string) {
 }
 
 async function run() {
+  initlog();
+
   const balances = await fetchBalances();
   let total = 0;
   const report: string[] = [];
-
-  initlog();
 
   for (const coin of COINS) {
     const amount = balances[coin];
