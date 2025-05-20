@@ -101,16 +101,18 @@ async function run() {
 
   log(report);
 
+  await sendTelegramMessage(report.join('\n'));
+
   // if (total >= parseFloat(process.env.ALERT_THRESHOLD!)) {
   //   // For now, just log to console
   //   log(`🚨 ALERT: Total portfolio value is above threshold: $${total.toFixed(2)}`);
   // }
-  let alertMessage = `Total value: ${total.toFixed(2)}`;
-  log(alertMessage);
-  await sendTelegramMessage(alertMessage);
+  // let alertMessage = `Total value: ${total.toFixed(2)}`;
+  // log(alertMessage);
+  // await sendTelegramMessage(alertMessage);
 
   if (total >= parseFloat(process.env.ALERT_THRESHOLD!)) {
-    alertMessage = `Total value exceeds threshold!`;
+    const alertMessage = `Total value exceeds threshold!`;
     log(alertMessage);
     await sendTelegramMessage('🚨 <b>Portfolio Alert</b> ' + alertMessage);
   }
