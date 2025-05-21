@@ -165,27 +165,33 @@ async function createMarketSellOrder(coinpair: string, quantity: number) {
   const fullParams = `${params.toString()}&signature=${signature}`;
 
   try {
+    // log(`posting: ${BASE_URL}${path}?${fullParams}`)
     const response = await axios.post(`${BASE_URL}${path}?${fullParams}`, null, {
       headers: {
         "X-MEXC-APIKEY": API_KEY,
       },
     });
-    log(`✅ Order placed for ${coinpair}:${response.data}`);
+    const alertMessage = `✅ Order placed for ${coinpair}: ${response.data}`;
+    log(alertMessage);
+    await sendTelegramMessage(alertMessage);
   } catch (err) {
-    log(`❌ Failed to place order for ${coinpair}: ${err}`);
+    const alertMessage = `❌ Failed to place order for ${coinpair}: ${err}`;
+    log(alertMessage);
+    await sendTelegramMessage(alertMessage);
   }
 }
 
 export async function autoTrimPortfolio(coins: Coin[]) {
   for (const coin of coins) {
-    const totalValue = coin.amount * coin.price;
-
-    if (totalValue > ASSET_BASE_VALUE) {
-      const excessUSD = totalValue - ASSET_BASE_VALUE;
-      const quantityToSell = parseFloat((excessUSD / coin.price).toFixed(6)); // round to 6 decimal places
+    const totalvalue = coin.totalvalue;
+    if (totalvalue > ASSET_BASE_VALUE) {
+      const excessUSD = totalvalue - ASSET_BASE_VALUE;
+      const quantityToSell = parseFloat((excessUSD / coin.price).toFixed(2)); // round to 2 decimal places
 
       if (quantityToSell > 0) {
-        log(`Selling ${quantityToSell} ${coin.pair} to keep balance at $${ASSET_BASE_VALUE}`);
+        const alertMessage = `Selling ${quantityToSell} ($${excessUSD.toFixed(2)}) ${coin.pair} to keep balance at $${ASSET_BASE_VALUE}`;
+        log(alertMessage);
+        await sendTelegramMessage(alertMessage);
         await createMarketSellOrder(coin.pair, quantityToSell);
       }
     }
@@ -215,14 +221,16 @@ async function run() {
 
   await sendTelegramMessage(report.join('\n'));
 
-  const exceededThreshold = total >= parseFloat(process.env.ALERT_THRESHOLD!);
+  const threshold = parseFloat(process.env.ALERT_THRESHOLD || "0");
+
+  const exceededThreshold = total >= threshold;
 
   if (exceededThreshold) {
     const alertMessage = `Total value exceeds threshold!`;
     log(alertMessage);
     await sendTelegramMessage('🚨 <b>Portfolio Alert</b> ' + alertMessage);
 
-
+    autoTrimPortfolio(coins);
   }
 }
 
