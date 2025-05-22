@@ -27,14 +27,34 @@ const API_KEY = process.env.MEXC_API_KEY!;
 const API_SECRET = process.env.MEXC_API_SECRET!;
 const ASSET_BASE_VALUE = parseFloat(process.env.ASSET_BASE_VALUE || "0");
 
-const getTimestamp = () => Date.now().toString();
+let cachedTimeOffset = 0;
 
-function sign(queryString: string, secret: string) {
-  return crypto.createHmac('sha256', secret).update(queryString).digest('hex');
+export async function getMexcServerTime(): Promise<number> {
+  const response = await axios.get(`${BASE_URL}/api/v3/time`);
+  return response.data.serverTime;
 }
 
+export async function syncMexcTimeOffset() {
+  const serverTime = await getMexcServerTime();
+  cachedTimeOffset = serverTime - Date.now();
+}
+
+/**
+ * the idea is to get the time as is on the MexC server
+ */
+export function getSynchronizedTimestamp(): number {
+  return Date.now() + cachedTimeOffset;
+}
+
+const getTimestampString = () => now().toString();
+
 function now() {
-  return new Date().toISOString();
+  return getSynchronizedTimestamp();
+  // return new Date().toISOString();
+}
+
+function sign(queryString: string) {
+  return crypto.createHmac('sha256', API_SECRET).update(queryString).digest('hex');
 }
 
 const logFile = process.env.LOGFILENAME!;
@@ -141,26 +161,22 @@ async function getMarketRule(symbol: string): Promise<MarketRule> {
   };
 }
 
-function roundToStepSize(quantity: number, stepSize: number): number {
-  const precision = Math.floor(Math.log10(1 / stepSize));
-  return parseFloat(quantity.toFixed(precision));
-}
-
-async function fetchPrice(symbol: string): Promise<number> {
+async function fetchPrice(pair: string): Promise<number> {
   const { data } = await axios.get(`${BASE_URL}/api/v3/ticker/price`, {
-    params: { symbol: `${symbol}USDT` },
+    params: { symbol: `${pair}` },
   });
   return parseFloat(data.price);
 }
 
 async function fetchBalances(): Promise<Record<string, number>> {
-  const timestamp = getTimestamp();
+  const timestamp = getTimestampString();
   const queryString = `timestamp=${timestamp}`;
-  const signature = sign(queryString, API_SECRET);
+  const signature = sign(queryString);
 
   const { data } = await axios.get(`${BASE_URL}/api/v3/account`, {
     headers: {
       'X-MEXC-APIKEY': API_KEY,
+      "Content-Type": "application/json",
     },
     params: {
       timestamp,
@@ -179,34 +195,34 @@ async function fetchBalances(): Promise<Record<string, number>> {
   return balances;
 }
 
+function roundToStepSize(quantity: number, stepSize: number): number {
+  const factor = 1 / stepSize;
+  return Math.floor(quantity * factor) / factor;
+}
+
 async function createMarketSellOrder(coinpair: string, quantity: number) {
-  const path = "/api/v3/order";
-  const timestamp = Date.now();
+  const timestamp = getTimestampString();
 
-  const params = new URLSearchParams({
-    symbol: coinpair,
-    side: "SELL",
-    type: "MARKET",
-    quantity: quantity.toString(),
-    timestamp: timestamp.toString()
-  });
+  const queryString = `symbol=${coinpair}&side=SELL&type=MARKET&quantity=${quantity}&timestamp=${timestamp}`;
 
-  const signature = crypto
-    .createHmac("sha256", API_SECRET)
-    .update(params.toString())
-    .digest("hex");
+  const signature = sign(queryString);
 
-  const fullParams = `${params.toString()}&signature=${signature}`;
+  const url = `https://api.mexc.com/api/v3/order/test?${queryString}&signature=${signature}`;
 
   try {
-    // log(`posting: ${BASE_URL}${path}?${fullParams}`) // TEST
-    const response = await axios.post(`${BASE_URL}${path}?${fullParams}`, null, {
+    // log(`posting: ${url}`) // TEST
+
+    const response = await axios.post(url, null, {
       headers: {
-        "X-MEXC-APIKEY": API_KEY,
-        "Content-Type": "application/x-www-form-urlencoded",
+        "Content-Type": "application/json",
+        'X-MEXC-APIKEY': API_KEY,
       },
+      params: {
+        timestamp
+      }
     });
-    const alertMessage = `✅ Order placed for ${coinpair}: ${response.data}`;
+
+    const alertMessage = `✅ Order placed for ${coinpair}: ${console.dir(response.statusText)}`;
     log(alertMessage);
     await sendTelegramMessage(alertMessage);
   } catch (err) {
@@ -226,11 +242,12 @@ async function createMarketSellOrder(coinpair: string, quantity: number) {
  */
 export async function autoTrimPortfolio(coins: Coin[]) {
   for (const coin of coins) {
-    const totalvalue = coin.totalvalue;
+    const totalvalue = coin.totalvalue + 30; // TEST
     if (totalvalue > ASSET_BASE_VALUE) {
       const excessUSD = totalvalue - ASSET_BASE_VALUE;
       const marketRule = await getMarketRule(coin.pair);
       const quantityToSell = roundToStepSize(excessUSD / coin.price, marketRule.stepSize);
+      log(`${coin.pair} stepsize: ${marketRule.stepSize}`)
 
       if (quantityToSell > 0) {
         const alertMessage = `Selling ${quantityToSell} ($${excessUSD.toFixed(2)}) ${coin.pair} to keep balance at $${ASSET_BASE_VALUE}`;
@@ -243,16 +260,19 @@ export async function autoTrimPortfolio(coins: Coin[]) {
 }
 
 async function run() {
+  await syncMexcTimeOffset();
+
   const balances = await fetchBalances();
   let total = 0;
   const report: string[] = [];
 
   const coins: Coin[] = [];
   for (const name of COINS) {
-    const price = await fetchPrice(name);
+    const pair = `${name}USDT`;
+    const price = await fetchPrice(pair);
     const coin = new Coin();
     coin.name = name;
-    coin.pair = `${name}USDT`;
+    coin.pair = pair;
     coin.amount = balances[name];
     coin.price = price;
     coins.push(coin);
@@ -268,14 +288,14 @@ async function run() {
 
   const threshold = parseFloat(process.env.ALERT_THRESHOLD || "0");
 
-  const exceededThreshold = total >= threshold;
+  const exceededThreshold = total < threshold; // TEST
 
   if (exceededThreshold) {
     const alertMessage = `Total value reached threshold!`;
     log(alertMessage);
     await sendTelegramMessage('🚨 <b>Portfolio Alert</b> ' + alertMessage);
 
-    // autoTrimPortfolio(coins);
+    autoTrimPortfolio(coins);
   }
 }
 
