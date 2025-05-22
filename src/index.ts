@@ -13,6 +13,7 @@ const COINS: string[] = (process.env.PORTFOLIOASSETS || '')
 
 
 class Coin {
+  name: string = '';
   pair: string = '';
   amount: number = 0;
   price: number = 0;
@@ -36,7 +37,7 @@ function now() {
   return new Date().toISOString();
 }
 
-const logFile = process.env.LOGFILEPATH!;
+const logFile = process.env.LOGFILENAME!;
 
 function log(report: string | string[]): void {
   if (!Array.isArray(report)) {
@@ -112,6 +113,39 @@ async function handleError(err: unknown) {
   }
 };
 
+interface MarketRule {
+  symbol: string;
+  stepSize: number;
+  minQty: number;
+}
+
+async function getMarketRule(symbol: string): Promise<MarketRule> {
+  const response = await axios.get(`${BASE_URL}/api/v3/exchangeInfo`);
+  const market = response.data.symbols.find((s: any) => s.symbol === symbol);
+
+  if (!market) throw new Error(`Symbol not found: ${symbol}`);
+
+  // hoping that 0.01 is a good default
+  const basePrecision = parseFloat(market.baseSizePrecision) || 0.01;
+  if (!basePrecision || isNaN(basePrecision)) {
+    throw new Error(`No usable precision info for ${symbol}`);
+  }
+
+  const stepSize = basePrecision; // e.g., 0.0001
+  const minQty = basePrecision;   // conservative assumption — could be adjusted if more data becomes available
+
+  return {
+    symbol,
+    stepSize,
+    minQty
+  };
+}
+
+function roundToStepSize(quantity: number, stepSize: number): number {
+  const precision = Math.floor(Math.log10(1 / stepSize));
+  return parseFloat(quantity.toFixed(precision));
+}
+
 async function fetchPrice(symbol: string): Promise<number> {
   const { data } = await axios.get(`${BASE_URL}/api/v3/ticker/price`, {
     params: { symbol: `${symbol}USDT` },
@@ -165,10 +199,11 @@ async function createMarketSellOrder(coinpair: string, quantity: number) {
   const fullParams = `${params.toString()}&signature=${signature}`;
 
   try {
-    // log(`posting: ${BASE_URL}${path}?${fullParams}`)
+    // log(`posting: ${BASE_URL}${path}?${fullParams}`) // TEST
     const response = await axios.post(`${BASE_URL}${path}?${fullParams}`, null, {
       headers: {
         "X-MEXC-APIKEY": API_KEY,
+        "Content-Type": "application/x-www-form-urlencoded",
       },
     });
     const alertMessage = `✅ Order placed for ${coinpair}: ${response.data}`;
@@ -181,12 +216,21 @@ async function createMarketSellOrder(coinpair: string, quantity: number) {
   }
 }
 
+/**
+ * Automatically trims the portfolio by selling excess amounts of coins
+ * if their total value exceeds a predefined base value. For each coin,
+ * if its value is above the ASSET_BASE_VALUE, it calculates the excess,
+ * creates a market order to sell the excess amount, logs the action,
+ * and sends a Telegram alert.
+ * @param coins Array of Coin objects representing the portfolio.
+ */
 export async function autoTrimPortfolio(coins: Coin[]) {
   for (const coin of coins) {
     const totalvalue = coin.totalvalue;
     if (totalvalue > ASSET_BASE_VALUE) {
       const excessUSD = totalvalue - ASSET_BASE_VALUE;
-      const quantityToSell = parseFloat((excessUSD / coin.price).toFixed(2)); // round to 2 decimal places
+      const marketRule = await getMarketRule(coin.pair);
+      const quantityToSell = roundToStepSize(excessUSD / coin.price, marketRule.stepSize);
 
       if (quantityToSell > 0) {
         const alertMessage = `Selling ${quantityToSell} ($${excessUSD.toFixed(2)}) ${coin.pair} to keep balance at $${ASSET_BASE_VALUE}`;
@@ -207,6 +251,7 @@ async function run() {
   for (const name of COINS) {
     const price = await fetchPrice(name);
     const coin = new Coin();
+    coin.name = name;
     coin.pair = `${name}USDT`;
     coin.amount = balances[name];
     coin.price = price;
@@ -226,11 +271,11 @@ async function run() {
   const exceededThreshold = total >= threshold;
 
   if (exceededThreshold) {
-    const alertMessage = `Total value exceeds threshold!`;
+    const alertMessage = `Total value reached threshold!`;
     log(alertMessage);
     await sendTelegramMessage('🚨 <b>Portfolio Alert</b> ' + alertMessage);
 
-    autoTrimPortfolio(coins);
+    // autoTrimPortfolio(coins);
   }
 }
 
