@@ -207,7 +207,7 @@ async function createMarketSellOrder(coinpair: string, quantity: number) {
 
   const signature = sign(queryString);
 
-  const url = `https://api.mexc.com/api/v3/order/test?${queryString}&signature=${signature}`;
+  const url = `https://api.mexc.com/api/v3/order?${queryString}&signature=${signature}`;
 
   try {
     // log(`posting: ${url}`) // TEST
@@ -222,7 +222,7 @@ async function createMarketSellOrder(coinpair: string, quantity: number) {
       }
     });
 
-    const alertMessage = `✅ Order placed for ${coinpair}: ${console.dir(response.statusText)}`;
+    const alertMessage = `✅ Order placed for ${coinpair}: ${response.statusText}`;
     log(alertMessage);
     await sendTelegramMessage(alertMessage);
   } catch (err) {
@@ -242,12 +242,12 @@ async function createMarketSellOrder(coinpair: string, quantity: number) {
  */
 export async function autoTrimPortfolio(coins: Coin[]) {
   for (const coin of coins) {
-    const totalvalue = coin.totalvalue + 30; // TEST
+    const totalvalue = coin.totalvalue;
     if (totalvalue > ASSET_BASE_VALUE) {
       const excessUSD = totalvalue - ASSET_BASE_VALUE;
       const marketRule = await getMarketRule(coin.pair);
       const quantityToSell = roundToStepSize(excessUSD / coin.price, marketRule.stepSize);
-      log(`${coin.pair} stepsize: ${marketRule.stepSize}`)
+      // log(`${coin.pair} stepsize: ${marketRule.stepSize}`)
 
       if (quantityToSell > 0) {
         const alertMessage = `Selling ${quantityToSell} ($${excessUSD.toFixed(2)}) ${coin.pair} to keep balance at $${ASSET_BASE_VALUE}`;
@@ -288,7 +288,7 @@ async function run() {
 
   const threshold = parseFloat(process.env.ALERT_THRESHOLD || "0");
 
-  const exceededThreshold = total < threshold; // TEST
+  const exceededThreshold = total >= threshold;
 
   if (exceededThreshold) {
     const alertMessage = `Total value reached threshold!`;
