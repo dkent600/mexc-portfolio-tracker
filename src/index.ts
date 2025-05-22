@@ -3,6 +3,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import * as dotenv from 'dotenv';
+import { Coin } from './shared';
+import { generateChartImage, sendTelegramImage } from './tgChart';
 
 dotenv.config();
 
@@ -10,17 +12,6 @@ const COINS: string[] = (process.env.PORTFOLIOASSETS || '')
   .split(',')
   .map(s => s.trim())
   .filter((s): s is string => !!s);
-
-
-class Coin {
-  name: string = '';
-  pair: string = '';
-  amount: number = 0;
-  price: number = 0;
-  get totalvalue(): number {
-    return this.amount * this.price;
-  }
-}
 
 const BASE_URL = 'https://api.mexc.com';
 const API_KEY = process.env.MEXC_API_KEY!;
@@ -247,7 +238,6 @@ export async function autoTrimPortfolio(coins: Coin[]) {
       const excessUSD = totalvalue - ASSET_BASE_VALUE;
       const marketRule = await getMarketRule(coin.pair);
       const quantityToSell = roundToStepSize(excessUSD / coin.price, marketRule.stepSize);
-      // log(`${coin.pair} stepsize: ${marketRule.stepSize}`)
 
       if (quantityToSell > 0) {
         const alertMessage = `Selling ${quantityToSell} ($${excessUSD.toFixed(2)}) ${coin.pair} to keep balance at $${ASSET_BASE_VALUE}`;
@@ -285,6 +275,9 @@ async function run() {
   log(report);
 
   await sendTelegramMessage(report.join('\n'));
+
+  const chartImage = await generateChartImage(coins, total);
+  await sendTelegramImage(chartImage, "Take Profit Asset Balances");
 
   const threshold = parseFloat(process.env.ALERT_THRESHOLD || "0");
 
