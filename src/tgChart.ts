@@ -2,6 +2,11 @@ import axios from 'axios';
 import { Coin } from './shared';
 import { ChartJSNodeCanvas } from 'chartjs-node-canvas';
 import FormData from 'form-data';
+import annotationPlugin from 'chartjs-plugin-annotation';
+import Chart from 'chart.js/auto';
+import { ChartConfiguration } from 'chart.js';
+
+Chart.register(annotationPlugin);
 
 const width = 600;
 const height = 300;
@@ -21,7 +26,7 @@ export async function generateChartImage(coins: Coin[], totalValue: number): Pro
     else return 'rgba(255, 159, 64, 0.8)'; // orange
   });
 
-  const configuration = {
+  const configuration: ChartConfiguration<'bar'> = {
     type: 'bar' as const,
     data: {
       labels,
@@ -43,7 +48,27 @@ export async function generateChartImage(coins: Coin[], totalValue: number): Pro
           display: true,
           text: `Portfolio Snapshot - ${new Date().toLocaleString()}`
         },
-        legend: { display: false }
+        legend: { display: false },
+        annotation: {
+          annotations: {
+            baseLine: {
+              type: 'line',
+              yMin: ASSET_BASE_VALUE,
+              yMax: ASSET_BASE_VALUE,
+              borderColor: 'blue',
+              borderWidth: 2,
+              label: {
+                enabled: true,
+                content: `ASSET_BASE_VALUE = $${ASSET_BASE_VALUE}`,
+                position: 'end',
+                backgroundColor: 'black',
+                color: 'white',
+                font: { size: 10, weight: 'bold' },
+                padding: 4
+              }
+            }
+          }
+        } as any // for `label`
       }
     }
   };
